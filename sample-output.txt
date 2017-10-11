@@ -1,0 +1,299 @@
+##############################################################################################
+single-process server
+##############################################################################################
+
+[1] single client communicating with server
+
+serverside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./a.out 32000
+bind successful.
+listening for connections.
+connected with client socket no:4
+Client socket 4 sent message:Hi
+Replied to client 4.
+Client socket 4 sent message:Hello
+Replied to client 4.
+
+
+clientside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client 127.0.0.1 32000
+Connected to server
+Please enter the message to the server: Hi
+Server replied: OK MIHIR
+Please enter the message to the server: Hello
+Server replied: OK MIHIR
+
+[2]Server accepts and processes only one client request
+
+client 2 side
+--------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client2 127.0.0.1 32000
+ERROR connecting
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ 
+
+[3]server terminates the connection only when "Bye" is received
+
+serverside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./a.out 32000
+Client socket 4 sent message:dBHBSKn
+Replied to client 4.
+Client socket 4 sent message:Bye mihir
+Replied to client 4.
+Client socket 4 sent message:    Bye
+Replied to client 4.
+Client socket 4 sent message:bye
+Replied to client 4.
+Client socket 4 sent message:Bye
+Replied to client 4.
+Client said bye;finishing..
+
+clientside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client 127.0.0.1 32000
+Please enter the message to the server: dBHBSKn
+Server replied: OK MIHIR
+Please enter the message to the server: Bye mihir
+Server replied: OK MIHIR
+Please enter the message to the server:     Bye
+Server replied: OK MIHIR
+Please enter the message to the server: bye
+Server replied: OK MIHIR
+Please enter the message to the server: Bye
+Server replied: Goodbye MIHIR
+
+
+#########################################################################################
+multi-process server
+#########################################################################################
+
+[1]multiple clients(handled by multiple processes) communicating with server
+
+serverside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./a.out 32000
+bind successful.
+listening for connections.
+connected with client socket no:4
+Client socket 4 sent message:Hi1
+Replied to client  4.
+Client socket 4 sent message:Hello1
+Replied to client  4.
+connected with client socket no:4
+Client socket 4 sent message:Hi2
+Replied to client  4.
+Client socket 4 sent message:Hello2
+Replied to client  4.
+connected with client socket no:4
+Client socket 4 sent message:hi3
+Replied to client  4.
+Client socket 4 sent message:hello3
+Replied to client  4.
+Client socket 4 sent message:whts up?3
+Replied to client  4.
+
+client1
+--------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client1 127.0.0.1 32000
+Connected to server
+Please enter the message to the server: Hi1
+Server replied: OK MIHIR
+Please enter the message to the server: Hello1
+Server replied: OK MIHIR
+Please enter the message to the server:
+
+client2
+---------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client2 127.0.0.1 32000
+Connected to server
+Please enter the message to the server: Hi2
+Server replied: OK MIHIR
+Please enter the message to the server: Hello2
+Server replied: OK MIHIR
+Please enter the message to the server:  
+
+client3
+--------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client3 127.0.0.1 32000
+Connected to server
+Please enter the message to the server: hi3
+Server replied: OK MIHIR
+Please enter the message to the server: hello3
+Server replied: OK MIHIR
+Please enter the message to the server: whts up?3
+Server replied: OK MIHIR
+Please enter the message to the server: 
+
+
+[2] After all the clients terminates, server still listening for new request
+
+serverside
+-----------
+.
+.
+Client socket 4 sent message:whts up?3
+Replied to client  4.
+Client socket 4 sent message:Bye
+Replied to client  4.
+Client said bye;finishing..            (client1 closed)
+Client socket 4 sent message:Bye
+Replied to client  4.
+Client said bye;finishing..            (client2 closed)
+Client socket 4 sent message:Bye
+Replied to client  4.
+Client said bye;finishing..            (client2 closed)
+.
+.
+connected with client socket no:4      (connects with new client)
+.
+.
+
+[3] Observation:- 
+    ----------------
+    In above output, we can notice that all the clients are connected to socket_descriptor with same no. 4.
+    This is because, socket descriptor nos. are specific to process.So, as all the clients are handled by different 
+    processes here, they can have same socket_des nos.
+    
+
+##################################################################################################
+multi-threaded server
+##################################################################################################
+
+[1]multiple clients(by multiple threads) communicating with server
+
+serverside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ gcc server3.c -lpthread
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./a.out 32000
+bind successful.
+listening for connections.
+connected with client socket no:4
+Client socket 4 sent message:Hi1
+Replied to client  4.
+connected with client socket no:5
+Client socket 5 sent message:Hello2
+Replied to client  5.
+connected with client socket no:6
+Client socket 6 sent message:whts up?3
+Replied to client  6.
+
+client1, client2, client3 outputs are same as case-(2).
+-------------------------------------------------------
+
+[2]After all the clients terminates, server still listens for new request
+
+serverside
+------------
+.
+.
+Client socket 6 sent message:whts up?3
+Replied to client  6.
+Client socket 4 sent message:Bye
+Replied to client  4.
+Client said bye;finishing..               (client1 closed)
+Client socket 5 sent message:Bye
+Replied to client  5.
+Client said bye;finishing..               (client2 closed)
+Client socket 6 sent message:Bye
+Replied to client  6.
+Client said bye;finishing..               (client3 closed)
+.
+.
+connected with client socket no:7         (connected to new client)         
+.
+.
+
+
+[3]As mentioned in case-(2), socket_des no. are specific to process. Here, we are using multi-threading to 
+   handle new clients.And all the threads belongs to the same process.So,as we can see in above output,at any 
+   time, all the clients will have different sock_des no. which are connected to server simultaneously.
+
+
+###########################################################################################################
+concurrent server with "select"
+###########################################################################################################
+
+[1]multiple clients(by select() call) communicating with server  
+
+serverside
+------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./a.out 32000
+bind successful.
+listening for connections.
+starting select loop. fdmax  3
+In select loop:socket 4 is ready to read
+Client socket 4 sent message:Hi1
+Replied to client 4.
+In select loop:socket 5 is ready to read
+Client socket 5 sent message:hello2
+Replied to client 5.
+In select loop:socket 6 is ready to read
+Client socket 6 sent message:whts up?3
+Replied to client 6.
+
+ 
+client1, client2, client3 outputs are same as case-(2), case-(3).
+-----------------------------------------------------------------
+
+[2]After all the clients terminates, server still listens for new request
+
+serverside
+-------------
+.
+.
+In select loop:socket 6 is ready to read
+Client socket 6 sent message:whts up?3
+Replied to client 6.
+Client socket 4 sent message:Bye
+Replied to client 4.
+Client said bye;finishing..                     (client1 closed)                       
+Client socket 5 sent message:Bye
+Replied to client 5.
+Client said bye;finishing..                     (client2 closed)
+Client socket 6 sent message:Bye
+Replied to client 6.
+Client said bye;finishing..                     (client3 closed)
+.
+.
+In select loop:socket 4 is ready to read        (connected to new client)
+Client socket 4 sent message:hi
+Replied to client 4.
+Client socket 4 sent message:hello
+Replied to client 4.
+.
+.
+
+
+[3]Here only one process is handling all the clients by using select() call,and port nos. are specific to
+   process as we know. So at any time, all the clients which are connected to server simultaneously will have
+   different sock_des nos.
+
+############################################################################################################
+some general test cases
+############################################################################################################
+
+[1] In case of all the servers, if wrong reply(anything apart from ok mihir/Goodbye mihir) is sent to the client
+    then client will display "error wrong reply from server" and client terminates. In the example below server replied
+    with blaank message.(I have tested this scenario before hardcoding the reply.) 
+ 
+clientside
+-------------
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$ ./client 127.0.0.1 32000
+Connected to server
+Please enter the message to the server: clear
+Server replied: 
+ERROR wrong reply from server
+mihirvegad@Wayne-Vostro:~/Desktop/cliser$
+
+
+[2] I have tested all the servers first on local machine. And then for clients on different machines as well, especially
+    in case of multi-client servers. All are giving expected behaviour.
+ 
+
+
+
+
+
+

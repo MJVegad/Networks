@@ -1,0 +1,204 @@
+Datacenter Networking
+====================
+
+Outline
+- Datacenter topologies: fat trees
+- Network load balancing / traffic engineering
+- Application / service load balancing
+
+================================================
+
+* Data Centers (DCs) are one of the hot things in the field of
+  computer systems. What are DCs? Large companies like Google store
+  lots of data and run various computations (e.g., computing search
+  indices) over the data. Even small/medium sized enterprises have
+  need for well-engineered DCs. The applications may be hosted on
+  physical or virtual machines. So, one of the networking problems in
+  DC design is: how to interconnect the various machines (i.e., how to
+  place switches / routers) such that the performance of the
+  applications is not bottlenecked by the network. This problem is
+  particularly interesting for applications that transfer lots of
+  data, and are bottlenecked by the network.
+
+* Typically, 20-40 servers are placed in a rack, and all connected to
+  a Top-of-Rack (ToR) switch. Several ToR switches connect to an
+  End-of-Row (EoR) switch. The switches are further connected by as
+  many levels as needed in a tree. At the top of the tree are core
+  switches. Below that the layers are named agrgegation, access, edge
+  etc., depending on how many levels exist. The topology is a mix of
+  L2 and L3, depending on number of servers and scalability
+  requirements.
+
+* What is the issue with such an organization. Switches higher up in
+  the tree need to carry more bandwidth, and have to be more powerful
+  / expensive. So, simple tree-based topologies are hard to scale. It
+  is unlikely that any two servers that are far away and need to go
+  through the top layers of switches will get to send/receive at their
+  linerate, due ot bottlenecks at the higher layer switches.
+
+* An alternative to such tree-based topology is what are called "fat
+  tree based topologies". Fat trees connect switches in such a way
+  that (a) any host can communicate with any other host at full
+  bandwidth, and (b) switches do not have to be more powerful /
+  expensive as you go higher up in the tree. That is, all switches at
+  all levels can be the same, commodity switches that are cheaply
+  available. Fat trees achieve this by providing lots of extra
+  switches at higher layers, lots of interconnections and paths
+  between switches.
+
+* A k-ary fat-tree can be used to interconnect k^3/4 hosts using
+  switches of k ports each. A fat tree is arranged into k pods, each
+  having k switches each. The switches in a pod are arranged into two
+  rows of k/2 switches each. The k/2 lower switches are connected to
+  k/2 hosts each, and the other k/2 ports connect to all the upper
+  layer switches. The remaining k/2 ports at each upper layer switch
+  connect to k/2 different core switches. 
+
+- How many lower layer switches in a pod? k * k/2
+
+- How many lower layer switches in a pod? k * k/2
+
+- How many core switches? Each of the upper layer switches needs k/2
+  connections, so total ports at the core must be k/2 * k/2 * k. Since
+  each core switch provides k ports, we need k/2 * k/2 core switches
+  of k ports each.
+
+- Note that all switches at all levels are uniform. "Fat trees, skinny
+  switches"!
+
+* [Draw figure of a normal tree and a fat tree, explain the
+  differences. Convince yourself that there are enough independent
+  paths in the fat tree from any source to any destination to enable
+  communication at the linerate. The two references on fat trees
+  explain this concept well pictorially.]
+
+* Bisection bandwidth - if you bisect the network into two halves, the
+  bandwidth between the two halves is called bisection bandwidth. The
+  minimum value of bisection bandwidth for any possible bisection is
+  an interesting quantity. It determines the network bottleneck
+  bandwidth when several hosts are communicating with each other. The
+  bisection bandwidth of the fat tree does not reduce as you go up the
+  tree (as it does for a normal tree), so you can get communication at
+  linerate without any network bottlenecks.
+
+* Now that we have a network that provides multiple paths between
+  leaves of the fat tree, how can we let the hosts use it? Layer 2 or
+  layer 3 forwarding usually follows one best path for each
+  destination, even if other paths are available. OSPF ECMP (Equal
+  Cost Multi Path) can take advantage of multiple paths to a
+  destination and split traffic among multiple paths. For ECMP to
+  work, the leaves should look like separate destinations in the
+  forwarding table, that is, we need to maintain state for k/2 * k/2
+  prefixes.
+
+* Another idea to utilize multiple paths: from every leaf, tunnel
+  traffic to a random core switch via one of several paths. Once the
+  traffic is diffused among core switches, then there is only pne path
+  from a core switch to a given destination, and packets can take that
+  path (core removes outer IP header and sends packet). This idea is
+  similar to the idea of "Valiant Load Balancing". How do we achieve
+  this diffusion of traffic from leaf up to core? Several ideas
+  exist. For example, use IP anycast. All core switches announce the
+  same anycast address. Then OSPF ECMP picks one path at random from
+  the several paths to the core. See the VL2 paper reference for a
+  detailed explanation of this idea.
+
+* Balancing load between several paths when multiple paths exist in
+  the network is the problem of network load balancing or traffic
+  engineering. Traditionally, traffic engineering is done offline
+  using estimated traffic matrices (from every leaf to other),
+  computing optimal paths offline, and pinning flows to paths using
+  MPLS. However, with fast changing traffic patterns, offline traffic
+  engineering may not work.
+
+* For online traffic engineering, simple techniques like ECMP work
+  fine for the most part, except when there is large asymmetry in the
+  network traffic patterns / link capacities etc. For example, when a
+  large flow starts on one of the paths, equally splitting traffic
+  over all paths may not be the best idea.
+
+* Load balancing / traffic engineering can be done in several ways:
+  (see the Conga reference for a detailed explanation of this
+  classification tree).
+
+- centralized (a central entity fixes paths) vs distributed (each
+  switch works independently)
+
+- at the network level (i.e., redirecting TCO flows to different
+  paths) or at the transport layer (using multipath TCP)
+
+- using no knowledge of congestion (ECMP, oblivious to other flows) or
+  only local knowledge of congestion (of next link) or global
+  knowledge (of entire path).
+
+- at the granularity of packets (leads to TCP reordering), flows
+  (large flows may skew bandwidth), or flowlets (small bursts of a
+  flow).
+
+* The Conga paper proposes a logic that runs at the leaves of the fat
+  tree. The leaf switches communicate with each other by using a
+  special header, which stores congestion information. All switches
+  along the path update this information. This way, the leaf switches
+  learn of congestion along the path, and adjust accordingly. So, the
+  paper proposes distributed but global congestion aware traffic
+  engineering / load balancing.
+
+* Next, we come to the layer 2 vs. layer 3 question. What are the pros
+  and cons of interconnecting servers at layer 2 vs. layer 3? Servers
+  in DCs are often hosted on VMs, and operators may want to move VMs
+  around for various reasons. So, layer 3 IP addresses have to change
+  during migration. For this reason, layer 2 might be more preferable,
+  provided we deal with the scalability issues. The VL2 reference
+  provides another novel idea: use two different IP addresses: one
+  location specific, and the other application specific. And an agent
+  at the switches rewrites between these two, so that end servers of a
+  particular service always think they are in the same subnet
+  irrespective of where they are located. A level of indirection in
+  addressing solves this problem. We will see a better solution to
+  this problem in later lectures when we study network virtualization.
+ 
+* Now we move on to a different problem in datacenters:
+  application-layer load balancing. Consider a web server that has
+  advertised a certain public IP. In reality, we don't have one but
+  several servers in a server farm that appear as one server. All of
+  these servers have one virtual IP (VIP), and each replica has its
+  own Direct IP (DIP). An application-layer load balancer (LB)
+  intercepts traffic to VIP, rewrites the destination to be one of the
+  DIPs. Similarly, outgoing traffic from DIP should also be source
+  NATted to a VIP. The LB should try to equally split load amongst all
+  DIPs, and also ensure that a given flow gets mapped to the same DIP
+  every time.
+
+* Usually LBs are built in hardware because they need to process lots
+  of traffic. However, hardware LBs are expensive. Instead, the
+  reference "Ananta" proposes a software LB. There are several
+  software multiplexers (SMux). There are several SMuxes, and can
+  scale out to any number. Traffic reaches one of the MUXes using
+  ECMP. For each packet, the SMux uses hash of flow tuple to map to a
+  DIP, ensuring that all packets of a flow go to the same DIP. Some
+  state needed for the MUX (e.g., VIP to DIP mapping, outgoign NAT
+  mapping) are computed by a central entity. 
+
+* Understand the difference between vertical scaling (getting a more
+  powerful loadbalancer) vs horizontal scaling (adding more replicas
+  to increase capacity). Also understand how central state management
+  makes horizontal scaling using software running on commodity
+  hardware possible.
+
+* Further reading:
+
+- "A Scalable, Commodity Data Center Network Architecture", Al-Fares
+  et al. Proposes the idea of using fat tree topologies in datacenter
+  networks.
+
+- "VL2: A Scalable and Flexible Data Center Network", Greenberg et
+  al. Refines the ideas of fat tree DC networks, and incorporates
+  ideas of ECMP / Valiant Load Balancing, virtual Layer-2 addresses
+  etc.
+
+- "CONGA: Distributed Congestion-Aware Load Balancing for
+  Datacenters", Alizadeh et al. Describes fine-grained
+  congestion-aware load balancing switches for data centers.
+
+- "Ananta: Cloud Scale Load Balancing", Patel et al. Describes a
+  solution for scalable application-layer load balancing.

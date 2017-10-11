@@ -1,0 +1,64 @@
+PROBLEM-1
+==========
+--> Iptables are used to set up, maintain and inspect the tables of ipv4 packet filter rules in linux kernel. Each table contains chains which has list of rules which matches a set of packets. Here, we will modify nat table, which is considered when a packet that creates a new connection is encountered. 
+
+--> In our case, all the clients are having private addresses belongs to 192.168.7/24, all the servers are running on private addresses belongs to 192.168.6/24. Clients are exposed to internet via a public host C. Servers are exposed to internet via a public host S. This scenario can be described by the figure given below.
+
+--> Now, clients want to communicate with servers. In order to make it possible, we need to mainipulate source and destination addresses of packets coming from client/server. We can do that by iptables commands mentioned in submitted scripts.
+
+--> iptables -t nat -A OUTPUT -p tcp -s 192.168.7.41 -d 192.168.6.41 --dport 5000 -j DNAT --to-destination 10.16.35.111:14000
+
+	This rule says that we are adding the rule to OUTPUT(locally generated packet goes here first)(In actual PREROUTING will work, as packets are coming from other machines) chain, We will check the generated packet on virtual interface(In actual one of the client), if its protocol is tcp, source ip address is 192.168.7.41 and destination address is 192.168.6.41:5000 then we will change its destination address to 10.16.35.111:14000(public address,S) using DNAT and -j(action) option. Accordingly we will change destination addresses of packets coming from other two clients(.42/.43) as well.
+
+--> Note that, We are using port 7171 for .41 client, 7272 for .42 client, 7373 for .43 client after change. Reason behind the use of different port nos. is, it will help us in differentiating the clients at server side, and in forwarding packet to corrosponding server.
+
+--> iptables -t nat -A POSTROUTING -p tcp -s 192.168.7.41 -d 10.16.35.111 --dport 7171 -j MASQUERADE
+
+At C, we need to change source address of the packets coming from clients as well. Because if server receives packet with private ip address as source, it can't reply back to that source in TCP conn. as it is not visible to server. To do this we are using special option MASQUERADE, we will replace source address of the packet by it's own address.
+
+--> Note that, we can use this option at POSTROUTING chain only, if we try to use it with other chain it will give invalid argument error. In POSTROUTING packets are almost leaving the machine, so its not convinient to change source address of packet for proper functioning of router on that hop.      
+
+--> iptables -t nat -F 
+
+It is used to flush the table mentioned in the command. Here, we are flushing nat table, before adding any rule to any chain.
+
+
+PROB-2
+=======
+
+--> Here, our task is same as mentioned above but we will do it in some different way. The idea is to create TUN interface at C and S, connect them via socket connection to make it work like tunnel. We will assign ip address range to TUN interfaces, so all the packets fall in that range will be go through tun interface. Tun interface will read packets from network and provides it to private host. Or it will read packets from the buffer(kernel) and write it to the network. This is called "Ip to Ip tunneling".
+
+-->Tun interface actually encapsulates/decapsulates the packet, wrap it into another set of layer headers and put it back to link.
+ openvpn --mktun --dev tun3
+It is used to create the tun interface named "tun3".
+
+ ip link set tun3 up
+ ip addr add 192.168.7.0/16 dev tun3
+It is used to assign range of ip address to the tun interface. In this case all the packets coming from 192.168.7.xxx will go through tun interface.
+
+--> To do all the things mentioned above. , we need to implement the corrosponding c code. 
+
+At server side,
+ gcc -o tuns tuns.c
+./tuns tun3 10.16.35.114 3445
+
+At client side,
+gcc -o tunc tunc.c
+./tunc tun3 10.16.35.114 3445  
+
+These lines will get tun3 ready for ip to ip tunneling.
+
+--> Inside c code at client/server side, While reading packets from network we need to ensure that we read the whole packet first and then only we write it to tun interface. We do that by using read_n() function call.
+
+--> Note that here, all the packets from 192.168.7.xxx goes through tun interface. We are not mainupulating packet header for routing. So, its possible to get cross connection like server running on 192.168.6.41 may get connected to 192.168.7.41. We can solve this problem by creating a seprate tunnel for each client-server communication. 
+ 
+
+
+
+
+
+
+COMPARE PART-1 with PART-2
+=============================
+
+--> 

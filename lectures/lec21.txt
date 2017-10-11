@@ -1,0 +1,169 @@
+Networking and Virtualization
+===============================
+Outline
+- Networking with virtual machines, software switches
+- Network Function Virtualization
+- Network Virtualization
+
+================================
+
+* Networking with VMs. How does networking work with VMs? When a VM is
+  created, it is hosted on a hypervisor, which connects the guest OS
+  to the host OS. Applications on the VM write to a vNIC (they think
+  it is a real NIC). Packets go through the TCP/IP stack on the guest
+  OS first. The hypervisor creates a "tap" device to receive all these
+  packets. Note that a tap device is similar to the tun device that we
+  saw before, except that it generates L2 frames, not IP
+  datagrams. The hypervisor gets these L2 frames and transmits them
+  via a software switch / bridge.
+
+* A software switch functions similar to a hardware switch, but works
+  as a kernel module. For example, the linux bridge or the more recent
+  Open vSwitch (OVS). Each of the vNICs of the VMs plug into one of
+  the virtual ports on the software switch / bridge. Typically, one
+  port also connects to a real physical NIC to send packets out. The
+  software switch works much like a real switch, and forwards packets
+  to other ports or via the physical interface. Packets then undergo
+  L2 processing at the physical NIC / device driver.
+
+* OVS has some advanced features compared to simple linux bridge. It
+  can speak OpenFlow to an SDN controller, in addition to regular
+  switching. It can also implement VLANs, tunnelling etc.
+
+* How are the IP addresses of VMs assigned? The hypervisor can
+  implement a NAT, so VMs have private IPs, which are rewritten to the
+  public IP of the physical interface. Otherwise, VMs can get IP
+  addresses from the same subnet as the physical machine, simulating
+  multiple physical machines instead of one. The hypervisor allows
+  several options when creating the VMs and vNICs.
+
+* Packet flow in a virtualized environment: guest application <->
+  guest OS <-> vNIC <-> vswitch <-> host OS <-> NIC. So, usually, one
+  additional step of network processing in guest OS, in addition to
+  host OS. This results in VMs not being able to process packets at
+  linespeed.
+
+* Several optimizations have been proposed by NIC vendors. One such is
+  called SR-IOV (Single Root IO Virtualization) by Intel. With SR-IOV,
+  each VM gets a MAC address that is configured at the NIC, and
+  sorting of packets based on L2 address happens inside the
+  NIC. Packets are transferred by DMA directly over to the VM,
+  bypassing all intermediate layers. However, such techniques can
+  support a direct channel to only a small number of VMs, and such
+  paths must be statically assigned. Also, packets to another VM on
+  the same physical machine must go to NIC, get re-sorted and come
+  back again. Packets to another VM on the same physical machine and
+  on different subnet must even go out to an IP router and come back.
+
+* The references describe a system called NetVM that improves upon
+  SR-IOV by addressing the above limitations. In NetVM, the packet is
+  not copied to any application, but to the hypervisor. The hypervisor
+  then processes the packet based on L2/L3 information and assigns to
+  VMs. Inter-VM packet transfer also happens without any additional
+  copies. NetVM incorporates a lot of additional optimizations as
+  well. NetVM is built using Intel DPDK (data plane development kit),
+  a library that allows development of such code that utilizes new
+  features in Intel NICs. 
+
+* What do VMs run? Typically, VMs run applications in data
+  centers. For example, web servers, mail servers, and such are run on
+  VMs instead of physical machines to better utilize physical
+  hardware. Other applications (e.g., build search index or mining
+  large data sets) also typically run on VMs. Several VMs are hosted
+  in large data centers. These datacenters can provide services for
+  local users or for users far away who access these applications
+  (cloud computing).
+
+* Who configures the VMs, plugs them into soft switches etc.? It can
+  be done manually in a small setup. Typically, this process is
+  automated by a cloud management system like OpenStack. These systems
+  provide an easy interface for you to create VMs, vNICs etc, and
+  handle all the connections with vswitches, IP address assignments
+  and so on.
+
+* These days, a new trend is to virtualize not just applications but
+  also network elements in between. This is called Network Function
+  Virtualization (NFV). For example, load balancers, firewalls,
+  proxies, NATs, (all of these are called network "middleboxes") even
+  routers and switches will be built in software as VM images. The
+  underlying physical network will only transport packets between
+  these VMs, and all packet processing will be done in hardware. NFV
+  has taken off because the cost of hardware network appliances has
+  been increasing, while software processing has been getting
+  faster. 
+
+* Note that Open vswitch and other software switches are also a case
+  of NFV - the switch is in software. However, performance benefits
+  from virtualizing Layer 2 and Layer 3 switches is not clear, due to
+  high overhead of software and relative ease in doing such things in
+  existing hardware. The main attraction is in virtualizing
+  complicated network functions that are hard to do in hardware. NFV
+  has mainly taken off with telecom compnaies that have a lot of
+  network functions (setting up data sessions, video calls, charging
+  etc.) in telecom backbones.
+
+* NFV requires high performance VMs, and efficient inter-VM
+  communication, even more so than traditional data center
+  applications. As a result, there is renewed interest in improving
+  network performance over VMs.
+
+* Now we move on to another hot area - network virtualization
+  (NV). Not to be confused with NFV or VM networking. In network
+  virtualization, we want to create a virtual network, nodes, and
+  links, without worrying about what the physical network looks
+  like. What is the motivation?  Currently, when you create a network
+  of VMs in a datacenter, the IP address of the VM is restricted to
+  the IP address subnet of the physical machine. The IP addresses of
+  multiple users must be coordinated. And a VM cannot move to any
+  physical machine outside its subnet. All these retrictions make it
+  hard to optimally work with VMs.
+
+* Key idea to network virtualization - tunnelling. (This has been
+  hinted at in the VL2 paper we saw in data center networking lecture
+  also.) Create virtual networks in a separate IP space, assuming that
+  no other networks exist. Then, when a packet has to move from one
+  virtual network element to another over the physical network, simply
+  tunnel to the next physical node. So, the virtual network is built
+  as an overlay over the physical network. The physical network does
+  not need to provide anything beyond IP connectivity. This idea has
+  been expanded in the network virtualization platform (NVP) reference
+  provided. [Show example of virtual and physical network mappings.]
+
+* Who creates these tunnels correctly between the software switches?
+  NVP sits between OpenStack (or any other cloud management system)
+  and the Open vswitch / hypervisor. In NVP, all the logical
+  forwarding in the virtual network graph takes place in the software
+  switch (OVS). OVS has multiple flow tables to perform several stages
+  of logical forwarding in the virtual network - L2, L3, firewalls
+  etc. NVP configures OVS flow tables via OpenFlow. When the software
+  switch decides that a packet must be sent to a virtual port / host /
+  switch in another physical machine, it is tunnelled there - physical
+  forwarding. 
+
+* Whenever a virtual network is created, NVP configures the
+  corresponding logical forwarding rules in OVS, and also the tunnels
+  between various software switches. Who computes the forwarding
+  rules, tunnels etc?  NVP is built on the Onix SDN controller we saw
+  in last lecture, as an application that uses SDN principles to
+  configure (not hardware switches as is usually the case, but)
+  software switches. NVP pushes out flow tables to OVS to do logical
+  forwarding, and tunnels for physical forwarding.
+
+* The synerg between NFV, NV, and SDN. NFV requires a lot of VMs
+  chained together in a flexible fashion. NV allows us to create such
+  VM chains in an easy way, without worrying about the physical
+  network. Finally, SDN makes all of these easy to manage in a
+  centralized fashion. So, NFV / NV has turned out to be a good
+  usecase for SDN principles. While NFV and NV can be done without
+  SDN, SDN makes them easier.
+
+* Further reading:
+
+- "NetVM: High Performance and Flexible Networking using
+  Virtualization on Commodity Platforms", Hwang et al. Describes a
+  system built on the Intel DPDK library that enables zero copy
+  transfer of packets to VMs, and low overhead inter-VM copy.
+
+- "Network Virtualization in Multi-tenant Datacenters", Koponen et
+  al. Describes a network virtualization platform design and
+  implementation.

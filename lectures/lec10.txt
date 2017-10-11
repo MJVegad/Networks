@@ -1,0 +1,51 @@
+Basics of Queueing Theory 
+(Guest lecture by Prof. Varsha Apte)
+====================================
+
+- Computer systems frequently have resources (e.g., link) that needs
+  to be shared by several customers. The resource is also called a
+  server, and it has a service rate (or service time
+  distribution). The customers or users of the system have an arrival
+  rate (or inter arrival time distribution). Customers wait in a
+  buffer while they wait for service. One of the most basic uses of
+  queueing theory is to analyze the behavior of the system in terms of
+  number of users in the system, number of users waiting in queue,
+  average queueing delay etc.
+
+- Let arrival rate of customers = lambda, service rate = mu. Then 
+
+  Utilization law rho = lambda / mu
+
+- The interarrival time of users and service time distribution are
+  both assumed to be exponential or memory-less.
+
+- To compute average waiting time, we model the system as a Markov
+  chain, where the state of the system is the number of customers in
+  the system. Then, when the system reaches steady state or
+  statistical equilibrium, the system moves from state "k" to "k+1"
+  with rate lambda, and from K=1 to K with rate mu.
+
+- Let pi_k demote the probability that the system is in state "k". We
+  use the steady state condition above, along with the fact that all
+  pi_k add up to 1, to derive the values of pi_k for all values of k.
+
+- In particular, pi_0 = probability that the system has 0 users = 1 -
+  rho (obvious in hindsight).
+
+- We canculate the expected number of users 
+
+  E[N] = sum over all k (k * pi_k) = rho / (1 - rho)
+
+- Now little's law states that the expected number of users in a
+  system is the rate at which users move through the system multiplied
+  by the average time the users spend in the system.
+
+  E[N] = lambda * E[R], using which we get 
+  E[R] = average waiting time in the system = 1 / (mu - lambda)
+
+- Using the above formulae, we compared FDM (frequency division
+  multiplexing), TDM (time division multiplexing), and STDM
+  (statistical time division multiplexing that happens with packet
+  switching) to understand their relative merits.
+
+  

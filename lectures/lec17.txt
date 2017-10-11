@@ -1,0 +1,236 @@
+Link layer: Introduction
+=========================
+
+Outline
+- Link layer functions
+- Link layer addresses, ARP
+- Shared broadcast, multiple access protocols, the original Ethernet
+- Bridges, switches, and spanning tree protocol
+
+========================================
+
+* We will deal with the link and physical layers together, since they
+  are usually designed in close coordination. We will only touch upon
+  physical layer aspects in this course.
+
+* What are the main function of the link layer? To transport an IP
+  datagram between two IP hops. Links can be between end host and
+  first hop router, or between two IP hops in the core. Different link
+  layer technologies are united by IP. Link layers run on many
+  different physical media. Examples: Ethernet over copper or fiber,
+  wireless, long distance fiber links.
+
+* The link layer is implemented in software + hardware. Some L2
+  functionality is in software (in device drivers in the OS for
+  example), rest of the L2 and PHY functionality is usually in
+  hardawre. The link layer hardware consists of the network interface
+  card (NIC) at the end hosts, and intermediate L2 network elements
+  like switches.
+
+* What are the main functions of the link layer?
+
+- Framing. Place an IP datagram (or any other network protocol packet)
+  in a frame. Framing usually involves adding a special start symbol
+  or preamble to denote start of frame, and an optional end-of-frame
+  marker at the end of the frame. A frame is a unit of transmission at
+  the link layer. A network datagram may or may not fit in one link
+  layer frame. For example, ethernet frames are big enough to hold TCP
+  segments if MSS is sized properly. On the other hand, some optical
+  links use much smaller frame sizes, so need to partition datagrams.
+
+  What if preamble occurs within the data part of a frame? Either
+  escape it (break the pattern with a special symbol) or use fixed
+  size frames, so you know where to look for preambles. Different link
+  layer protocols use different frame formats. The only requirement is
+  that an IP datagram should be transported.
+
+- Error detection, correction, recovery. Link layers use techniques
+  like parity bits, checksums, or Cyclic Redundancy Check (CRC) to
+  detect bit errors in received frames. Ocassionally, error correcting
+  codes can also be used to recover from bit errors. More wired link
+  layers use only error detection (e.g., Ethernet uses 32 bit
+  CRC). Wireless link/physical layers often use error correction
+  because bit errors are more prominent.
+
+  Some link layers also retransmit frames (stop-and-wait or sliding
+  window) to recover from bit errors. Ethernet does not do
+  retransmissions at the link layer, as packet errors are rare.
+
+- Flow control: Some link layers also have mechanisms to regulate the
+  sending rate so as to not overwhelm the receiver, much like how TCP
+  implements flow control.
+
+- Link access: Some link layers like point-to-point have only one
+  sender at a time on a link. However, some link layers like Ethernet
+  and wireless are shared broadcast media, and require protocols to
+  arbitrate access to the medium.
+
+* Once a link layer frame is given to the physical layer, it is
+  actually converted into voltages and send as electrical pulses as a
+  wire. Several encoding schemes exist for this process:
+
+- NRZ (non return zero): low voltage for 0, high voltage for
+  1. Problem: too many 0s or 1s leads to loss of synchornization
+  between sender and receiver.
+
+- NRZI (NRZ inverted): stay at current signal to encode 0, transition
+  to encode 1. Works for string of 1s, but synchronization issue for
+  string of 0s.
+
+- Manchester encoding: low to high transition for 0, high to low
+  transition for 1. Lots of transitions make it easy clock
+  recovery. But the bit rate will be only half the "baud" rate, while
+  it will be equal to baud rate for NRZ.
+
+- 4B/5B encoding: groups of 4 bits are mapped to 5 bits. Such mappings
+  ensure there are no long string of 0s. 4B/5B with NRZI ensures
+  enough transitions.
+
+* Link layers work with Layer-2 or MAC addresses, which are 48 bits
+  long. MAC addresses are unique across all adapters (a manufacturer
+  gets a prefix, and ensures uniqueness within the adapters of the
+  organization). A special broadcast MAC address is the address with
+  all 1s - ff:ff:ff:ff:ff:ff. Link layer headers have the source and
+  destination MAC addresses. The network adapter filters out
+  non-broadcast frames that are not destined to its MAC address,
+  except when configured to be in a special "promiscuous" mode.
+
+* When forwarding an IP datagram, the IP layer gives the next hop IP
+  address. The link layer then maps the next hop IP address to the MAC
+  address of the first hop IP router, places this destination MAC in
+  the link layer header and forwards the packet. How does a node know
+  the MAC address of the first hop IP router? Using Address Resolution
+  Protocol (ARP).
+
+* How does ARP work? When A is communicating with a host B (say, its
+  first hop IP router) for the first time, A sends a broadcast packet
+  requesting to know the MAC address of B. Then the destination B
+  replies with its MAC address to A. B also stores a mapping between
+  A's IP and MAC, as it may need to communicate with A in the
+  future. All other nodes which have mappings for A and B also refresh
+  them. The ARP mappings are valid for a certain period and
+  timeout. The ARP mappings are stored as part of the forwarding table
+  itself - map from prefix to next hop IP, interface / link, and MAC
+  address of next hop.
+
+* Example: consider a simple two-hop network A to B to C. When A has a
+  datagram to send to C, the source and destination IP addresses in
+  the IP datagram are always that of A and C. Then A learns that the
+  next hop IP is B, figures out the MAC address of B via ARP, and
+  places the MAC addresses of A and B as source and destination MAC
+  addresses in the link layer header. When packet reaches B, B looks
+  up its forwarding table, realizes that the next hop is C, and
+  modifies the link layer header to have MAC addresses of B and C as
+  source and destination MAC addresses (B learns of C's MAC address
+  via ARP again). This is how the IP datagram finally reaches C. Note
+  that the source and destination IP in the packet is always that of A
+  and C, but the source and destination MACs keep changing with every
+  IP hop.
+
+* Medium access: when multiple nodes share a shared broadcast medium,
+  the link layer decides who transmits when using a medium access
+  control (MAC) protocol. One technique is to partition the channel
+  using techniques such as TDMA or FDMA. Another class of MAC
+  protocols called random access protocol, which is more suited for
+  bursty traffic patterns found in packet switched networks. The first
+  random access protocol was ALOHA. In "slotted" ALOHA, time was
+  divided into slots. At the beginning of the slot, the N nodes which
+  have packets to send try to independently access the medium with a
+  probability "p". The transmission succeeds if exactly one node
+  accesses the medium. If two or more nodes transmit together, the
+  transmissions fail due to "collisions". The utilization of the
+  medium, defined as the probability that the channel does useful
+  work, is defined as the probability that only one of the N nodes
+  transmits. Therefore, U = N p (1-p)^{N-1}. This utilization is
+  maximum when p = 1 / N, and the asymptotic value of the optimum
+  utilization is 1/e = 0.37 for large N. That is, ALOHA works well
+  when the value of the access probability p is set carefully, and the
+  best it can work is still only 37% of the capacity of the link.
+
+* Random access protocols perform better when they are based on
+  "carrier sense" - that is, nodes sense the energy on the medium to
+  determine whether someone else is sending or not, and transmit only
+  if the medium is free. CSMA (carrier sense multiple access)
+  protocols work this way. Are collisions completely eliminated with
+  carrier sense? No, because there is a finite detection delay between
+  a node starting transmission and other nodes identifying the medium
+  to be busy. Therefore, if two nodes start transmissions within the
+  detection delay, then collisions can still happen. What causes
+  non-zero detection delay? Two factors: the propagation delay of the
+  signal (at speed of light), and hardware processing delay to detect
+  medium as busy.
+
+* Ethernet uses the CSMA/CD MAC protocol (CSMA with collision
+  detection). That is, nodes sense the medium a small duration, and
+  start transmitting if medium is idle. If a transmitter detects a
+  collision has occurred after sending its preamble, (say, by finding
+  that energy on channel is more than what can be caused by one
+  transmission), then it sends a special jamming sequence and aborts
+  the transmission. The node then waits for some time before
+  retransmitting again. The wait time between successive
+  retransmissions of the same frame increases exponentially
+  ("exponential backoff") to avoid collisions.
+
+* The maximum size of Ethernet is restricted to 2500m. Why? The longer
+  the cable is, the longer it takes for faraway nodes to detect the
+  channel is busy, and the higher the probability of collisions. The
+  minimum size of Ethernet frame is fixed to 64 bytes (14 byte header
+  + 46 byte payload). Why? Let "d" be the propagation/detection delay
+  between two nodes A and B. When A starts sending a frame, B senses
+  the medium busy only after time d. If B starts transmitting in this
+  period, then the jamming signal takes a time d to reach
+  A. Therefore, the minimum frame size should be such that it lasts
+  for a period of 2d at least. The minimum frame size of 64 bytes is
+  picked such that the frame lasts at least for a duration 2d, where d
+  is the propagation delay along the maximum sized Ethernet cable.
+
+* Ethernet hubs: when multiple ethernet cables terminate in a hub, the
+  hub transfers frames from one port to all other ports to emulate a
+  shared medium broadcast. Ethernet hubs have scalability issues of a
+  shared broadcast medium. However, most LANs today are made of
+  switched Ethernet.
+
+* What is the difference between an Ethernet switch and an Ethernet
+  hub? When multiple hosts connect to the various ports in a switch,
+  the switch forwards a frame only to the output port that leads to
+  the destination. How does a switch learn this information? When node
+  A sends a frame through a port numbered "i" on the switch, the
+  switch learns that MAC address of A is reachable via port "i". So
+  the next time a frame arrives with destined to A's MAC address, the
+  switch will forward the packet only on port "i". When a switch sees
+  a destination MAC for the first time, it has to flood the frame on
+  all ports, as it doesn't know the mappings.
+
+* What is the difference between a bridge and a switch? A bridge is a
+  term used for a device that connects 2 or a small number of LANs. A
+  bridge performs similar functions as a switch (learns which MAC
+  addresses are on which ports, and forwards only on the right
+  ports). So a switch is just a multiport bridge.
+
+* If the topology of switches / bridges in the network has a loop,
+  broadcast frames will keep circling forever. To avoid this problem,
+  switches in a LAN run the spanning tree protocol (STP). That is,
+  switches use a distributed protocol to construct a spanning tree
+  over all the switches, with the switch of the smallest ID (say, MAC
+  address) as the root of the tree. Only ports of a switch that are on
+  the spanning tree are active, and switches do not send or receive
+  frames over the inactive ports. Switches re-run STP to construct a
+  new topology as switches fail or topology changes.
+
+* Switches vs. routers: 
+
+- Switches need no configuration (as they learn which ports to forward
+  on automatically). Routers need to be configured with which prefixes
+  they own etc. So switches are better for quickly interconnecting
+  nodes.
+
+- Switches require lots of broadcasts (first packet to a destination,
+  ARP etc), and need to store per-MAC address state. As such, they
+  don't scale well. Routers scale much better as they can aggregate IP
+  addresses into prefixes, and need not flood.
+
+- Switched networks can have heterogenity of link types etc., unlike
+  IP routers which only work with the IP protocol.
+
+- In conclusion, small networks are usually built as switched LANs,
+  and larger networks have IP routers and perform layer 3 routing.

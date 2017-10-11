@@ -1,0 +1,290 @@
+Linux IP networking
+
+Outline
+
+- TCP/IP processing in the Linux Kernel
+- Netfilter hooks and iptables
+- tun devices and raw sockets
+
+-----------------------------------------------------------------
+
+* In this lecture, we will understand how IP networking is implemented
+  in a typical end host. Most hosts implement IP in the kernel, so we
+  will study IP networking in the Linux kernel (other OSes should be
+  similar conceptually).
+
+* First, assume that the routing tables are populated in the kernel
+  (How is this done? We will discuss this later.) What happens when a
+  packet is transmitted and received?
+
+* Packet transmission: Application writes packet to kernel. Data
+  written into the send buffer. The transport protocol (say, TCP)
+  takes the data, forms a segment, adds header, called IP transmit
+  function (UDP does something similar). IP adds header, looks up
+  destination address for a route, finds out the interface / link to
+  send it on, and placed packet in the output queue of the device. All
+  this is done when you do a "write" into a socket. From here on, the
+  device driver takes on. The kernel schedules the device driver to
+  run at a different time. The driver adds link layer headers and
+  hands over to the network hardware.
+
+* Packet reception: When packet arrives on the physical medium, the
+  device driver stores the packet in a backlog queue in the
+  kernel. The kernel scheduler schedules the kernel code to handle the
+  packet at a later point. When this code is invoked, the IP layer
+  checks for errors and such. If the packet clear the checks, IP
+  checks if the destination is the local host, or another host. If the
+  packet is destined to the local host, the packet is handed off to
+  TCP for its processing (process TCP data and place into receive
+  buffer, update TCP state if it is a TCP ACK, etc.). If the packet is
+  not destined to the local host, the IP module looks up destination
+  address, updates IP headers (like TTL), and places packet in the
+  output queue of the corresponding interface.
+
+* Now, how are the routing tables populated? Linux has three types of
+  routing tables. One is the neighbor table, which includes
+  information on all destinations that are directly reachable (e.g.,
+  nodes on the same LAN). This table has the MAC-layer addresses of
+  neighbors as well, to populate the link-layer headers. This table is
+  filled in by the "ARP" protocol that we will study about when we
+  study the link layer. Next, we have the FIB (Forwarding Information
+  Base or forwarding table), which has the next hop information for
+  all destination prefixes. The most frequently used destinations from
+  the FIB and placed in the "routing cache". During route lookup, the
+  routing cache is checked first. If the destination is not found
+  here, the FIB is consulted.
+
+* The kernel only does forwarding. The routing protocols themselves
+  can be implemented as userspace programs that can modify the
+  forwarding tables in the kernel based on the messages they send and
+  receive. The Linux kernel has a simple "routed" program that
+  implements a simple intradomain routing protocols. Another popular
+  software the "Quagga" software suite that implements several intra
+  and interdomain routing protocols.
+
+* Note that your Linux desktop doesn't forward packets by default (and
+  hence doesn't act a router by default). You need to set a sysctl
+  variable to enable IP forwarding and make it act as a router. Once
+  you do this configuration, it can serve as a decent router for low
+  rate traffic. In the next lecture, we will see how real high speed
+  routers are built.
+
+* Newer networking hardware (Network Interface Cards or NICs) provide
+  some advanced functionality. One such feature is TCP segmentation
+  Offload (TSO). With a TSO-enabled NIC, the kernel needn't do TCP
+  segmentation. The kernel can write up to 64KB segments into the
+  device driver queue. The NIC will perform TCP segmentation and
+  adding headers to the individual segments in hardware for better
+  performance.
+
+* Linux also has an optional traffic control and queueing discipline,
+  between the IP processing and device driver queue. By enabling and
+  configuring these modules, you can implement various scheduling
+  policies and traffic shapers (e.g., priority queues, token bucket
+  filters etc.). You can lookup the "tc" command in Linux for more
+  details.
+
+* What if you want to modify the IP packet processing in the kernel?
+  For example, you may want to implement a NAT or firewall
+  functionality. One way is to modify the kernel, but that is a hard
+  thing to do. Instead, newer kernels provide you with "hooks" at
+  several points of the packet processing via a framework called
+  "Netfilter". There are 5 netfilter hooks defined (meaning, there are
+  5 places in the kernel where you can intercept packets easily):
+
+(1) Prerouting: after packets enter the machine and pass some sanity
+    checks, before any routing decision is made. After this hook, the
+    destination is looked up to determine if the packet is for the
+    local host or external destination.
+
+(2) Input: this hook gives you access to incoming packets that are
+    destined for the local host.
+
+(3) Forward: this hook gives you access to incoming packets that are
+    destined to another interface and are forwarded by this machine.
+
+(4) Output: this hook gives you access to packets generated by the
+    local machine before any routing decision is made.
+
+(5) Postrouting: this hook gives you access to all packets that are
+    leaving the machine (both generated locally, as well as forwarded
+    from other hosts).
+
+* To do simple packet processing using the netfilter framework, you
+  can write a kernel module that intercepts the packet at one or more
+  of these hooks. All packets that pass through this hook will pass
+  through your kernel module code, and you can do many things with the
+  packet, like accept it and pass it on to the next module, drop it,
+  rewrite some headers, pass to some user space process etc. You can
+  write a simple NAT or firewall as a kernel module using netfilter
+  hooks.
+
+* What if you don't want to touch the kernel at all, and want to
+  remain in userspace? You can use the "iptables" framework to write a
+  simple NAT or firewall using simple commands from
+  userspace. "iptables" is a user space program built on top of
+  netfilter hooks. You can write a set of rules/commands in iptables
+  using the commandline, and these will be implemented via netfilter
+  hooks for you.
+
+* You can do three main types of things with iptables, each of which
+  has a dedicated table where you can store your rules: 
+
+(1) The "filter" table is used to store rules related to
+    filtering. This is used when you want to drop packets, e.g., to
+    implement a firewall. This is the default table.
+
+(2) The "nat" table is used when you want to alter the source and
+    destination IP addresses or ports to implement NAT functionality.
+
+(3) The "mangle" table is used for any other type of packet alteration
+    (besides filter and NAT).
+
+* You can use iptables for one of the three functions above (filter /
+  nat / mangle). You can write several rules in each of these three
+  tables. These rules will be organized into "chains", based on which
+  netfilter hook you want to invoke them. For example, the filter
+  table has 3 chains: input, output, and forward. This means that you
+  can write a rule to inspect and drop packets at the input, output,
+  and forward netfilter hooks. Similarly, the NAT table has 3 chains:
+  prerouting, postrouting, and output. 
+
+* Note that you cannot have arbitrary combination of table and chain
+  in iptables. For example, can you write a rule that tries to use NAT
+  filter in the input chain? No, it doens't make sense for you to
+  change source and destination IPs anymore after you have decided
+  that the packet going into your application space. So not all tables
+  (filter / NAT ) can be used at all Netfilter hooks (or iptables
+  chains)
+
+* So, once you select a table (filter / nat / mangle) based on what
+  you want to do, and once you select a chain (based on which
+  netfilter hook you want to operate at), you can add a rule that
+  matches on one or more packet header fields and does some action
+  (like drop, rewrite destination address, etc.). So, the iptables
+  command will specify the table, chain, and rule (which includes
+  pattern to match packet, and action to take). Note that all rules
+  under a particular table and chain are executed in a particular
+  order (you can specify the order, by default it is the order in
+  which they were added.)
+
+* You can choose a table with "-t" command (iptables -t nat ..)
+
+* You can add your rule to one of the chains with the -A command
+(iptables -t nat -A POSTROUTING ...)
+
+* You can specify a pattern to match a subset of packets based on
+  protocol (tcp/udp), source or destination IP addresses or port
+  numbers, whether packet is from a new TCP connection or from
+  established connection, etc.
+
+* Some possible actions (you can specify actions with -j flag):
+
+- Accept or Drop the packet
+
+- Source NAT (SNAT): change the source address for NAT operation to
+  some static value.
+
+- Masquerade: like SNAT, except that source IP will be picked
+  dynamically based on which interface the packet is leaving. No need
+  to specify source IP.
+
+- Destination NAT: change destination address to divert packets to
+  some other machine.
+
+- Redirect to a local machine
+
+* For example, consider the following simple rule:
+
+  iptables -t filter -A OUTPUT -p tcp --dport 80 -j DROP
+
+  This rules says use the filter table, add a rule to the OUTPUT
+  chain. The rule itself matches on TCP packets on destination port
+  80, and drops all such packets. This is a simple (though
+  meaningless) firewall rule, which when executed will prohibit HTTP
+  access from your machine.
+
+* Another example:
+
+  iptables -t nat -A OUTPUT -p tcp --dport 80 -j DNAT --to-destination 10.129.5.191:8080
+
+  This rule says that all outgoing HTTP packets (going to port 80 at
+  some destination) must be redirected to a different destination
+  (that, for example, has a proxy server running on it). Note that
+  this has to be done at the OUTPUT hook and not at POSTROUTING
+  hook. [Why? Because it doesn't make sense to change destination
+  address at POSTROUTING after a routing decision has been made based
+  on the destination address. Destination address should be changed
+  before routing, so that packet can be routed using new destination
+  address.]
+
+* You can list all iptables rules using "iptables -L". You can clear
+  all rules using "iptables -F". Please try out a few examples to get
+  a better feel.
+
+* Another interesting concept in the Linux kernel: tun/tap devices. A
+  tun device is a simple virtual device. When you send traffic to a
+  regular device, it goes out the physical medium. In contrast, when
+  you divert traffic to a tun device (say, by setting up a route
+  command), then the traffic will undergo regular IP processing as
+  usual, and will will be handed over to a userspace program that
+  attaches to the tun device. When the user space program attached to
+  the tun device does a read on the socket connected to the tun
+  device, it will receive IP datagrams with TCP/IP headers in tact,
+  much like how it goes over the physical interface. Now, if you want
+  to perform tunnelling, you can once again write this IP datagram
+  obtains from tun device into a socket connected to a real physical
+  device. The packet will then undergo another round on encapsulation
+  with IP headers. So, read from tun device and writing to regular
+  socket connected to physical device will lead to IP-in-IP
+  encapsulation.
+
+* What about writing to a tun device? Any traffic written into the tun
+  device by the userspace program will go through regular IP
+  processing like traffic that came from a real device. So, any write
+  done on a socket connected to the tun device must write IP datagrams
+  with IP headers and all (not just regular application layer
+  messages). Suppose a userspace program reads data from a regular
+  network device (after IP processing), and writes to tun device. Then
+  IP headers will be removed twice, i.e., decapsulation of IP-in-IP
+  packets.
+
+* A "tap" device does the same for Layer 2 processing. That is, when a
+  userspace program reads from tap device, it gets Layer 2 frames with
+  L2 headers. Similarly, when it writes to a tap device, it must write
+  with L2 headers.
+
+* The tun device is used to implement tunnelling concepts. For
+  example, suppose you have two offices using a private address space,
+  and they both want to connect via the public internet. You can use a
+  VPN-like application that is based on tun devices. At one of the
+  locations, you can divert all traffic destined to private address
+  space into a tun device. The user space program can encapsulate it
+  (IP-in-IP tunneling) to the other end point, where another program
+  will inject into tun device again.
+
+* Another advanced concept in the Linux kernel: RAW sockets. When you
+  open a RAW socket and write data to it, all TCP/IP kernel processing
+  will be bypassed on the data. That is, you will need to write
+  complete packets with all the headers and everything correctly. The
+  packets will directly be put into the device queue. Similar, when
+  you read from raw sockets, you will get the packets intact with all
+  headers. Can you think of one application of raw sockets that you
+  have all used? [tcpdump uses raw sockets to read packets with all
+  headers intact from the device.] Many security applications (e.g.,
+  generate badly formed TCP/IP packets to test your security solution)
+  also have uses for raw sockets.
+
+* See the references for some interesting links. 
+
+- "How To Set Up a Firewall Using IPTables on Ubuntu 14.04"
+https://www.digitalocean.com/community/tutorials/how-to-set-up-a-firewall-using-iptables-on-ubuntu-14-04 
+
+- "Linux IP Networking"
+http://www.cs.unh.edu/cnrg/people/gherrin/linux-net.html 
+
+- "Network Address Translation"
+http://www.karlrupp.net/en/computer/nat_tutorial
+
+- "Tun/Tap interface tutorial"
+http://backreference.org/2010/03/26/tuntap-interface-tutorial/

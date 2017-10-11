@@ -1,0 +1,337 @@
+Bandwidth allocation and Fairness
+==================================
+
+Outline
+- QoS architectures: Intserv and Diffserv
+- Admission control: Token Bucket Filter
+- Scheduling policies: FIFO, priority queueing, round robin, fair queueing, weighted fair queueing, deficit round robin
+
+
+------------------------------------------------------------------------------------
+
+* Basic problem: internet only provides best effort. What can you do
+  to get more quality of service (QoS) guarantees from the network? We
+  will discuss two proposals in this direction. Note that none of
+  these proposals are fully deployed yet, but parts of them have found
+  some traction.
+
+* By QoS, we mean end-to-end bandwidth and delay
+  guarantees. Paricularly important for real time audio/video
+  applications. Multimedia applications can withstand a small amount
+  of delay by buffering incoming data and delaying playback by few
+  hundreds of milliseconds. However, they cannot delay playback by
+  much for interactivity. So such applications will work well if there
+  is some bound on end-to-end latency. Most applications have some
+  basic adaptability built into them (e.g., change resolution of video
+  stream or adjust playback buffer), so are able to survive on
+  Internet today even though no QoS mechanism is in place.
+
+* Clasification of applications for QoS: elastic (any bandwidth at any
+  time, e.g., FTP) and interactive (need some minimum bandwidth to be
+  useful). Interactive can be non-real time (e.g., web) or real
+  time. Real-time can be intolerant (e.g., mission critical
+  applications) or tolerant. Toleratant can be non-adaptive (voice
+  calls with fixed encoding) or adaptive. Adaptive is further delay
+  adaptive (can change play back point) or rate adaptive (can change
+  video resolution). Typically, you need special treatment for
+  intolerant realtime services, and next class for tolerant realtime
+  services. The rest can be handled by best effort.
+
+* Two major streams of thought - Integrated Servicers (Intserv) and
+  Differentiated Services (Diffserv). Main difference is scalability -
+  Intserv maintains per-flow state in routers and makes sure each flow
+  meets its requirements. Diffserv groups traffic into few classes and
+  works with them. So Diffserv is more scalable.
+
+* Main components of any QoS scheme (specifically IntServ):
+
+- Flow specification. Each flow must specify what its generated
+  traffic will be like (Tspec), and what are its requirements in terms
+  of delay and bandwidth/loss (Rspec). Flow can be TCP flow, per user
+  traffic, a traffic class (like video) etc.
+
+- Reservation and admission control. Sender sends a call setup message
+  along with Tspec along the path to the receiver. The receiver
+  replies with its Rspec back to sender. All routers along the path
+  reserve the requested resources. If any request cannot be met, the
+  particular flow is not admitted and error is sent to sender and
+  receiver. By the end of the reservation step, every router along
+  path has state for this flow (like, how much traffic can it send,
+  what priority) etc.
+
+- Traffic classification and marking. Now, once flow is setup, data
+  can be sent. Now, whenever packet arrives, router looks up flow's
+  IP/port etc to identify the flow, its flowspec etc.
+
+- Traffic policing/shaping. If any router finds that a flow is
+  violating its spec, it can drop excess packets from the flow.
+
+- Scheduling. Finally, all confirming packets are placed in a queue,
+  and router schedules them according to a suitable scheduling
+  scheme. By default, routers use first in first out (FIFO). More
+  sophisticated schemes are needed to provide QoS.
+
+* Does using RSVP make Internet connection-oriented, and violate fate
+  sharing principle? The key ideas of RSVP - receiver oriented and
+  soft state (as opposed to hard state that lives in routers
+  forever). Here, receivers refresh their reservations periodically,
+  so it is okay even if some routers crash. Hence does not violate
+  robustness of the connectionless internet. If routers crash and path
+  changes, router that notices change will resend the request message,
+  and receiver will reply and setup state. RSVP has found uses beyond
+  Intserv, as we will see later.
+
+* IntServ supports two main types of traffic in addition to best
+  effort. First is guaranteed service (for intolerant real time
+  applications). Such flows specify a maximum bound on delay. Second
+  type of traffic in Intserv is called "controlled load", meaning the
+  flows will receive service as if in lightly loaded network. Some
+  combination of all the above mechanisms will help achieve these QoS
+  guarantees.
+
+* Note that only the high-level ideas have been agreed on. No
+  widespread implementation and deployment yet. Needs changes in all
+  layers of the stack: applications have to be re-written to convey
+  the QoS guarantees, routers have to change, that too across all hops
+  of a path. So a lot of inertia to make all these changes.
+
+* A simpler alternative: Diffserv. In diffserv, the edge routers
+  classify and mark packets into one of few classes. The unused TOS
+  field in IP header is used for this. Once classification is done,
+  routers along the path can see this marking and provide service
+  accordingly. Router behavior for different classes is specified in
+  what are called per-hop behaviors (PHB). This is in contrast to
+  end-to-end protocols in Intserv. So, edge marks packets, routers
+  follow PHB, and that's all. Simpler and more scaleble than IntServ.
+
+* One PHB is expedited forwarding (EF). This is like guaranteed
+  service of Intserv, where EF flows are given highest priorities to
+  ensure bounded delays. Another PHB is assured forwarding (AF), which
+  is like controlled load in IntServ. For AF, you use the idea of
+  Weighted RED (WRED). Assign different drop probability curves
+  (remember that RED has a drop probability curve as a function of
+  average queue length) for different traffic classes. The list of
+  PHBs is not complete, many more to be defined if DiffServ needs to
+  be widely used.
+
+* After studying the high level architectures, we will study two main
+  ideas in more detail: traffic shaping and router scheduling. Some
+  combination of these ideas is always needed to provide QoS.
+
+------------
+* The idea of a token bucket filter (TBF) - used to specify traffic,
+  as well as shape incoming traffic. Think of a bucket in which tokens
+  accumulate at rate "R". The bucket can hold up to "B" tokens, called
+  bucket depth. If no tokens accumulated, flow can send at rate R. If
+  tokens accumulated, it can send up to a burst B. Optionally, the
+  peak rate R can also be specified, so that the burst B doesn't go at
+  a very high rate. 
+
+* For example, consider TBF with R = 1 packet/s. B = 20 packets. P = 5
+  packets/s. Then, if the flow doesn't have any traffic for a long
+  time, it can send at rate P for 4 seconds, after which all tokens in
+  bucket will be empty, and it can subsequently send at rate R.
+
+----------------
+
+* Router scheuling high-level problem: several flows at a bottleneck
+  router. We will need to allocate the bottleneck bandwidth in a
+  max-min fair way between them.
+
+* Note: what granularity should fairness be ensured? Based on source?
+  destination? source-destination pair? TCP flow? One of the last two
+  is usually preferred. We will refer to the granularity at which
+  fairness should be maintained as "flow".
+
+* What are common router scheduling policies / queueing disciplines?
+
+- First come first serve (FCFS or FIFO). No guarantee whatsoever.
+
+- Priority queueing. When a flow of higher priority exists, send it
+  before flow of lower priority. May end up starting some flows. Not
+  really fair, but useful when you want to prioritize certain type of
+  traffic. We will revisit it later.
+
+- Round robin (RR). Enqueue each flow separately. Send from each
+  flow's queue in round robin fashion. Simple. O(1)
+  complexity. Results in max-min fairness only if packet sizes are
+  equal, which is not always the case.
+
+- Fair queueing (FQ). In ideal world, we want to do bit-by-bit round
+  robin (BR), so that max-min fairness is achieved even with variable
+  packet sizes. However, packet is the granularity of
+  transmission. The fair queueing algorithm tries to emulate BR over
+  entire packets. Most FQ algorithms are O(log N) where N is number of
+  "active" flows.
+
+- Weighted fair queueing (WFQ). It is possible to give priority to
+  flows. For example, we may want to send 1 bit of a flow for every
+  "w" bits of another flow. Then the second flow is said to have a
+  weight of "w". The WFQ algorithms lets us specify weights in this
+  manner. WFQ is also usually O(log N).
+
+- Deficit round robin (DRR) is an approximation to FQ. It is O(1) like
+  RR but tries to achieve FQ type allocation in the long run.
+
+* We will study BR, FQ, WFQ, DRR in detail. Consider the following
+  running example throughout the lecture. Two flows A and B are
+  sharing a link that has a capacity of 1 bit/sec. A has two packets,
+  say A1 and A2, of 100 bits each that arrive at t=0 and t=50. B has
+  two packets (B1, B2) of 50 bits each that arrive at t=50. Let us
+  understand the various scheduling policies using these example.
+
+* With FCFS, the order of packets and the end times of transmissions
+  are as follows. A1(100), A2(200), B1(250), B2(300).
+
+* With RR, A1(100), B1(150), A2(250), B2(300). Some unfairness to B
+  due t its smaller packet size.
+
+* Let's see what ideal BR should do. When a bit is sent from one
+active flow each, we count that as a "round". We will track both
+rounds, time, and bits sent.
+
+Time	Round BitsofA  BitsofB	Event
+0	0     0	       0	A1 arrives
+50	50    50       0	A2,B1,B2 arrive
+150	100   50       50	A1,B1 done
+250	150   50       50	B2 done
+300	200   50       0	A2 done
+
+So BR achieves the following order A1,B1(150), B2(250), A1(300). We
+want to achieve something similar using packets. That is the goal of
+FQ.
+
+* Note the relationship between round number and number of active
+  flows. In 0-50, round number grew by one each second. In 50-150, it
+  grew by one every 2 seconds because of 2 active flows. This can be
+  generalized as follows. dR/dt = L/N_ac. L is rate of link (faster
+  link means round finish faster). N_ac is number of active flows
+  (more flows means round go slower).
+
+* Key idea of FQ: for every incoming packet, compute the round at
+  which it will finish, and schedule packets based on this finish
+  round number. Let SX_i and FX_i be the rounds in which packet i of
+  flow X starts and finishes transmission. Then, note that FX_i = SX_i
+  + P_i where P_i is simply length of packet i. What is SX_i?
+
+* If no earlier packet of this flow in queue when packet arrives, then
+  SX_i is simply the round in which the packet arrives
+  AX_i. Otherwise, it is round in which previous packet finishes FX_{i-1}. SX_i
+  = max(FX_{i-1}, AX_i), where AX_i is arrival round of packet i of
+  flow X.
+
+* For every flow, as long as you keep updating the round computation
+  with time, the FQ algorithm works as follows. Whenever a packet
+  arrives, put it in per-flow Q. Compute its finishing round number
+  (either based on finishing round number of previous packet, or based
+  on arrival round number). Whenever link gets free, pick the packet
+  with the smallest F and transmit it. This algorithm is guaranteed to
+  give max-min allocation and performance similar to BR. Complexity
+  O(log N).
+
+* Lets see how it works for the example above.
+  SA_1 = 0. FA_1 = 0 + 100 = 100
+  SA_2 = max(100, 50) = 100. FA_2 = 100+100 = 200
+  SB_1 = 50. FB_1 = 50+50 = 100
+  SB_2 = max(100, 50) = 100, FB_2 = 100+50 = 150
+
+* Sorting packets in order of finishing rounds and transmitting them,
+  we get A1(100), B1(150), B2(200), A2(300). Note that we get the
+  order of bit-wise round robin, therefore we have achieved our goal.
+
+* Preemptive vs non-preemptive. If a packet with lower F arrives when
+  a packet is being transmitted, you cannot normally preempt ongoing
+  transmission in practice.
+
+* Weighted fair queueing: you send "w" bits of a flow in a certain
+  round. So FX_i = SX_i + P_i/w. So flows with higher wait finish in
+  earlier rounds, have lower F, and get picked faster.
+
+* BR based on weights for earlier example achieves the following order: B1, B2, A1, A2
+
+Time	Round BitsofA  BitsofB	Event
+0	0     0	       0	A1 arrives
+50	50    50       0	A2,B1,B2 arrive
+110	60    10       50	B1 done
+170	70    10       50	B2 done
+200	100   30       0	A1 done
+300	200   100      0	A2 done
+
+* WFQ calculations on the same example
+  SA_1 = 0. FA_1 = 0 + 100 = 100
+  SA_2 = max(100, 50) = 100. FA_2 = 100+100 = 200
+  SB_1 = 50. FB_1 = 50+50/5 = 60
+  SB_2 = max(60, 50) = 60, FB_2 = 60+50/5 = 70
+
+* So order of transmission in WFQ should be B1, B2, A1, A2 much like
+  BR. However, since B1 doesn't arrive till t=50, A1 will be
+  sent. Depending on preemptive or non-preemptive mode, B1 may have to
+  wait till A1 finishes. If no preemption A1(100), B1(150), B2(200),
+  A2(300). If A1 gets prempted at 50, then we have the following
+  finishing times. B1(100), B2(150), A1(200), A2(300). Phew!
+
+* Alternate to FQ: deficit round robin (DRR). It is similar to RR,
+  except for the notion of credits/deficit. Every queue maintains a
+  deficit counter. In each round, every queue receives a "quantum" Q
+  of credits. Once the transmission finishes, the data transmitted is
+  deducted from the deficit counter DC. In every round, only those
+  queues with positive DC are allowed to transmit. In some sense, the
+  notion of credits ensures fairness across different apcket
+  sizes. Different Q for each queue can create preferential treatment
+  for some flows. In long term, leads to bandwidth allocation similar
+  to FQ, though short term delays may be different.
+
+* Lets work out DRR for earlier example with Q=60.
+
+Round Time   DC_A 	    DC_B    	Event
+1     0      0+60=60	    0		A1 arrives, starts transmission
+1     100    60-100=-40     0+60=60	B1 starts
+1     150    -40	    60-50=10	B1 done, one round done
+2     150    -40+60=20	    10		A2 starts
+2     250    20-100=-80	    10+60=70	A2 done, B2 starts
+2     300    -80	    70-50=20	B2 done
+
+* It lead to same order as RR. Why? What can be done to fix it? Let's try with quantum size of 40.
+
+Round Time   DC_A 	    DC_B    	Event
+1     0      0+40=40	    0		A1 arrives, starts transmission
+1     100    40-100=-60     0+40=40	B1 starts
+1     150    -60	    40-50=-10	B1 done, round 1 done
+2     150    -60+40=-20	    -10+40=30	skip A, start B2
+2     200    -20	    30-50=-20	B2 done, round 2 done
+3     200    -20+40=20	    -20		A2 starts
+3     300    20-100=-80	    -20		A2 done
+
+* Smaller quantum size led to A1, B1, B2, A2 which is closer to what
+  FQ gets. Is DRR equal to FQ for quantum size of 1 bit? For example,
+  consider what will happen in the following situation. N flows, N-1
+  of which have packets of size M. The Nth flow is initially
+  empty. For M-1 rounds, no one sends anything, since DC<0. The Nth
+  flow gets a packet just at the beginning of round M. In the Mth
+  round, all N-1 flows will send their packets, and the Nth flow will
+  send one bit. What would FQ have done? Is the packet delay of Nth
+  flow same with DRR and FQ? Is the bandwidth allocation the same?
+  Think about it.
+
+* Other things routers can do: Weighted RED (WRED). Have different
+  drop probability RED curves for different flows.
+
+* For "guaranteed service" of IntServ with bounded delay guarantees,
+  traffic shaping using TBF + guaranteed bandwidth using appropriate
+  scheduling like WFQ at every router can provide provably bounded
+  delays. Why? Because your queueing delay is only influenced by your
+  own traffic in WFQ. So if your traffic is limited by TBF, maximum
+  queue size any packet will see is only bucket size in TBF. The
+  "controlled load" class of IntServ also needs some kind of WFQ, but
+  lower priority than guaranteed class.
+
+* Further reading:
+
+- "Analysis and Simulation of a Fair Queueing Algorithm", Demers and
+  Shenker. The original paper proposing the idea of fair queueing.
+
+- "On the Efficient Implementation of Fair Queueing",
+  Keshav. Describes some of the implementation aspects of fair
+  queueing.
+
+- "Efficient Fair Queueing Using Deficit Round Robin", Shreedhar and Varghese.

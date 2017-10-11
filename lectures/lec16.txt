@@ -1,0 +1,298 @@
+Practical issues and solutions at the network layer
+============================================================
+
+Outline
+- Traffic engineering with BGP
+- Routing convergence
+- Internet measurements
+- NAT traversal
+- Briefly: Broadcast and multicast routing, ATM.
+
+==============================================================
+
+* Recap of BGP from last class, and continuation of BGP. Who needs to
+  run BGP? Does a stub organization have to run BGP? In the common
+  case, a small organization that buys internet service from an ISP
+  just has a static route pointing to the ISP, and gets a small chunk
+  of the ISP's IP address space. The ISP takes care of advertising a
+  (usually) larger prefix that covers the IP space of several
+  customers in one aggregated entry.
+
+* However, many organizations try to have more than one ISP for
+  redundancy. This is called multihoming. In this case, the
+  organization usually prefers to get its own IP address block, and
+  announce it over BGP to several ISPs. Goals of multihoming: load
+  balancing across ISPs so that the traffic rate is within the
+  contract, to provide redundancy as primary / backup (use second ISP
+  only if first is down), use specific ISPs for specific kinds of
+  traffic (for example, some ISPs or backbone networks charge less for
+  traffic between academic institutions).
+
+* What happens if you use IP prefixes from one ISP's address space,
+  while being multihomed?  Suppose your first ISP gives you a prefix
+  A/24, and the ISP itself announces a larger A/20 prefix. Now, you
+  take your A/24 and announce it via your second ISP also. Now, due to
+  longest prefix match, your traffic will always arrive via the second
+  ISP which is announcing A/24.
+
+* How do you do load balancing with multihoming? Announce some
+  prefixes via one ISP and rest via the other. If a prefix is
+  announced via two ISPs, you can load balance on outgoing traffic
+  (you can set your forwarding tables to send half the traffic on one
+  link, and rest on the other). However, load balancing for inbound
+  traffic is hard. That is, you have no control over which link the
+  traffic destined to your hosts arrives on. It depends on how other
+  routers compute their best paths.
+
+* How do you do configure primary/backup links when you have
+  multihoming? Suppose you have two ISPs, P and S, to serve as your
+  primary and secondary ISPs. That is, you want traffic to come via S
+  only if your link via P is down. If you announce the same prefix via
+  P and S, you have no control on which link traffic arrives on. So
+  you can do some tricks using BGP. For example, you may announce an
+  aggregated prefix (say, one /24) via S, and more specific prefixes
+  (say, two /25) via P. So, by default, all traffic will come via the
+  P link. Only when the /25 prefixes announced by P are withdrawn due
+  to failure of the link via P, then traffic will come via the /24
+  through S. Another trick is AS path padding. You can pad your origin
+  AS number several times on the path announced via S (e.g., AS1 AS2
+  AS3 AS3 AS3), so that it appears as a longer AS path and will not be
+  picked by default.
+
+* Aggregating routing table entries. About half the prefixes in
+  Internet routing tables are more specific versions of larger
+  prefixes. So people argue that a lot of these entries can be
+  aggregated to save valuable space, especially in core routing tables
+  that tend to be very large. However, note that about half these
+  cases of a larger and smaller prefix both appearing are due to
+  multihoming. That is, the larger prefix and the smaller prefix have
+  different AS paths, indicating that some kind of traffic engineering
+  is being done. In such cases, if you aggregate the prefixes, then
+  the desired traffic engineering cannot be achieved. BGP has a field
+  to indicate if the route can be aggregated or not, which should be
+  respected by other BGP routers.
+
+* BGP routing convergence. When BGP routing information changes (e.g.,
+  a new prefix or path has come up, or an existing one has gone down),
+  BGP updates (announcements or withdrawals) are sent between BGP
+  routers. What is the time taken from the time the change happens to
+  the time that all routers know of and act according to this new
+  information? This time is called the convergence time of a BGP
+  update. Empirical studies have shown that this time is several tens
+  of seconds. For example, researchers have inserted artificial path
+  changes and observed how long it takes for these changes to get
+  reflected in publicly available routing tables. This delay is around
+  40-80 seconds for new routes coming up, and 80-200 seconds for old
+  routes going down. It has also been observed that connectivity to
+  the prefix is bad before convergence.
+
+* What explains this high convergence time and issues with BGP? BGP
+  undergoes what is called "path exploration" when a routing change
+  happens. Since no router has complete knowledge of the topology, a
+  few paths have to be tried before the correct routing tables are
+  computed. While BGP does not have the routing loops and count to
+  infinity problems with distance vector protocols, it does not have
+  the quick convergence property of link state protocols either.
+
+* Example: consider 3 ASes 1, 2, 3, all connected to each other and to
+  a router R. Ignore the policy aspects of BGP for now. Initially, all
+  ASes use their direct path to R, but also learn of the other 1-hop
+  paths to R. Now suppose 1 discovers first that its link to R is
+  down. Then it sends a withdrawal for its direct route, starts to use
+  the route 2->R, and announced this to everyone. Now, this route will
+  be come invalid when 2 discovers its link to R is down and withdraws
+  the route. But in the meantime, 3 discovers its link to R is down,
+  and decides to use the route 3->1->2->R that was announced by 1. So
+  messages from everyone about their direct routes (and all other 1
+  hop / 2 hop / 3 hop routes) going down have to reach everyone
+  else. Only then will the routing table entries converge to the new
+  state of no routes to R.
+
+* Note that path exploration will be more as the connectivity of the
+  AS graph increases. If the AS graph were a tree, then there would be
+  no exploration, as everyone would have only one path between any two
+  points. However, once some extra edges are added, path exploration
+  starts to happen.
+
+* In addition to the path exploration described above, routers also
+  have a certain timer called the minimum route advertisement interval
+  (MRAI). When an update to a prefix is sent by a router, it waits for
+  MRAI before sending next update. This is to bunch updates related to
+  a certain network event instead of flooding the network with
+  information. The MRAI adds to the convergence delay, because nodes
+  have to wait 30 seconds between successive steps in the path
+  exploration.
+
+* Not all updates seen in BGP are due to genuine network topology
+  changes either. Sometimes a router gets overloaded and stops
+  responding to BGP keepalive messages temporarily. The other BGP peer
+  assumes the link is down and sends a withdrawal, followed by an
+  announcement soon after. So the route goes between on and off states
+  quite frequently. This is called "route flapping". BGP also has a
+  mechanism to identify such unstable prefixes. Prefixes that change
+  often are awarded a penalty, and updates to such prefixes are
+  suppressed for a certain duration once the penalty crosses a
+  threshold. This is called route flap dampening.
+
+* Now, BGP changes lead to disruption of network connectivity. During
+  path exploration, packets may often go down temporarily incorrect
+  paths. Various pathologies can occur. For example, you can have
+  transient forwarding loops where packets go around in loops and get
+  discarded. Various measurements have observed the correlation
+  between temporary bad connectivity to a destination, and the BGP
+  updates for that destination.
+
+* End-to-end measurements (usually via traceroutes to measure IP paths
+  and delays) are an important tool to understand the quality of
+  Internet paths, in contrast to hop-by-hop measurements that do not
+  give the complete picture. Several studies have been conducted to
+  study the end-to-end quality of Internet paths. Two main metrics -
+  the prevalence of a path (measures how often you see a certain IP
+  hop path between two nodes) and persistence (how long a given route
+  is going to be around). According to a very famous study (see
+  references) done a few years ago, typical Internet paths are fairly
+  stable and prevalent (that is, a single best route is most widely
+  used). However a small fraction of paths see instability every few
+  seconds to every few hours.
+
+* Another network layer issue of practical concern - NAT traversal. We
+  have seen so far that hosts behind NATs can initiate TCP connections
+  to public hosts, but are not reachable from outside. Usually, a NAT
+  also has a firewall that stops incoming packets to any internal host
+  that it believes do not belong to any existing flow. Suppose two
+  hosts A and B are both behind such NATs (+ firewalls), and they want
+  to communicate with each other, say, as part of a P2P
+  application. Without any external mechanism, such communication
+  cannot happen.
+
+* First let us consider NAT traversal for UDP traffic. One method
+  followed is to have special servers called STUN (Session Traversal
+  Utilities for NATs) servers. Hosts A and B communicate with the STUN
+  server initially. This way, the server will know the external IP
+  address and port of the hosts. It will then send this information to
+  A and B. Now A and B will try to send a packet to the external
+  addresses of each other. Suppose A sends a packet first. Now when
+  B's packet reaches A, the firewall believes this is reply to A's
+  packet and allows this packet through. (Even if A hasn't already
+  sent the packet, B can retry periodically, and succeed within a few
+  attempts.) This technique is also called NAT hole punching. Such
+  elaborate techniques are used by P2P software like Skype to help
+  hosts behind NATs to connect with each other.
+
+* Basic premise of the above STUN-based method: the NAT uses the same
+  external IP address and port for a given internal IP address and
+  port of host A, irrespective of whether it is communicating with the
+  STUN server or host B. That is, the NAT only rewrites the source IP
+  but not the source port. Only then can the address conveyed by the
+  STUN server be used by the other host B to send a packet to host
+  A. That is, we require that the external IP and port assigned the
+  NAT be the same for a given source IP and port, irrespective of what
+  the destination IP and port is. However, some type of NATs called
+  symmetric NATs pick a random port number for different connections
+  to different destinations from the same internal source IP and
+  port. NAT traversal is very hard with such NATs. In such cases,
+  users must program the NAT (if allowed by the network administrator)
+  to allow traffic on certain ports or allow certain traffic to pass
+  through using special protocols that communicate with NATs. For
+  example, with the UPnP (universal plug n play) protocol, hosts can
+  request a specific public IP and port for their connections and
+  convey it to the other end points, so that connections can be
+  initiated. However, not all NATs and networks support such
+  functionality.
+
+* What about NAT traversal for TCP flows? TCP is a much harder problem
+  even with non-symmetric NATs. With TCP, host A generates a SYN
+  packet to B, but the reply (SYN ACK) cannot be generated by the
+  application layer at B (it is in the control of the OS). So, if both
+  end points start a TCP flow, both sides will send SYN and not get
+  SYN ACK as a reply because the SYN will be dropped by the other
+  NAT. So NAT traversal is a much harder problem. Several techniques
+  have been proposed. In one method, the hosts send SYN packets but
+  they are sent with a low TTL so that they are dropped before
+  reaching a host. The end hosts then use RAW sockets to learn the TCP
+  initial sequence numbers and send it to a STUN server. The STUN
+  server then spoofs SYNACKs to both hosts with the correct sequence
+  number. After this, ACKs go through, and both NATs are fooled into
+  believing that the TCP flow has been setup. Such techniques involve
+  various network issues (e.g., spoofing may be blocked) and may not
+  always succeed.
+
+* A few topics in the network layer that we won't go into much detail:
+  broadcast and multicast routing. So far, all layer 3 routing
+  algorithms we have seen are for unicast routing, from one host to
+  another. Two other modes of communication: broadcast (send a
+  messsage to all nodes) or multicast (send a message to a subset of
+  hosts). There are algorithms to enable network layer broadcast and
+  multicast. Note that network layer multicast (where multicast is
+  done at the level of IP routers, by sending only one copy of the
+  packet over common IP links) is different from application layer
+  multicast (where application nodes build an overlay network and
+  perform multicast). Network layer broadcast and multicast are better
+  than doing several unicasts or application layer multicast, because
+  duplicate traffic at the network layer is suppressed.
+
+* Broadcast routing: given a message, send it all reachable routers in
+  some domain. For example, link state announcements (LSAs) must be
+  broadcast. One way is for every node to flood a received message on
+  all other links (uncontrolled flooding). This can soon result in a
+  "broadcast storm" if there are cycles in the network graph - the
+  message will keep on getting flooded (e.g., A -> B -> C -> A -> B ->
+  C and so on). One way to prevent this is sequence number controlled
+  flooding. Messages are given sequene number before broadcast by the
+  source. Every node maintains the highest sequence number broadcast
+  for every source. A node does not forward a broadcast message if it
+  has sent that sequence number already. OSPF uses such an algorithm
+  for its LSA flooding.
+
+* Another idea for broadcast routing: reverse path forwarding. When a
+  packet receives a broadcast packet from a source, it forwards it on
+  all other links ONLY if the link on which the packet arrived is on
+  its shortest path to the source. That is, packets are propagated
+  only by routers that are on the shortest path. Since no cycles exist
+  on the shortest path, broadcast storm will not happen.
+
+* Multicast: a group of routers in the Internet wish to receive
+  data. Network layer multicast will prevent duplicate copies of the
+  packet over common links, and is better than separate unicasts to
+  each node. The Internet has special class D addresses for multicast
+  groups - each group receives a unique multicast IP address. To
+  subscribe to a multicast group, a host must communicate with the
+  first hop IP routers via a protocol called IGMP (Internet Group
+  Management Protocol). Then, all IP routers run a multicast routing
+  protocol to establish multicast routes. One multicast routing
+  protocol is an RPF-like routing protocol, with pruning to supress
+  forwarding to nodes that have no multicast subscribed children. Such
+  a protocol is suitable when the multicast tree is "dense" with most
+  of the IP routers participating. Other protocols exist for when the
+  multicast tree is sparse. Note that network layer multicast has not
+  taken off in any big way today.
+
+* Note that we mainly studied IP as part of network layer. IP has won
+  out over several other competing proposals for the network layer,
+  notably ATM (Aynchronous Transfer Mode). ATM was a networking stack
+  that was based on virtual circuits and provided reliability and
+  other such QoS guarantees at the network layer. In ATM, data was
+  sent as 53 byte ATM cells. So variable sized packets had to be
+  broken down into cells and the overhead was too high. Before a flow
+  started, a virtual cirtuit has to be setup. Every outgoing flow on a
+  link was given a virtual cirtuit identifier (VCI) during connection
+  setup.  VCIs are unique only over a link (not globally). During
+  connection setup, for every incoming flow, routing was done once to
+  determine outgoing link, an outgoing VCI was computed, and a mapping
+  between incoming VCI and outgoing VCI was stored. So forwarding a
+  cell required looking up incoming VCI to determine outgoing VCI and
+  outgoing link. This lookup was considered simpler than longest
+  prefix match on every packet. However, due to various technical and
+  business reasons, ATM didn't really take off as a network layer
+  technology. Eventually, IP (and datagrams, as opposed to virtual
+  circuits) won over as the layer 3 technology of choice. However, ATM
+  and related ideas have uses in Layer 2 (as we will see in the later
+  part of the course).
+
+* Further reading
+
+- "Delayed Internet Routing Convergence" Labovitz et al. 
+
+- "End-to-End Routing Behavior in the Internet", Paxson.
+
+- "Characterization and Measurement of TCP Traversal through NATs and Firewalls", Guha and Francis.

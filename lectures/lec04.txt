@@ -1,0 +1,179 @@
+Socket Programming and Server Architectures
+===========================================
+
+*** Outline ***
+- Socket programming API
+- Techniques for concurrency (I/O multiplexing) at the server
+
+-------------------------------------------------------------------------
+
+* Applcation layer interfaces with the lower layers via the socket
+  interface. For example, a web server opens a socket, browser opens a
+  socket, both sockets are linked to provide a datapipe
+  abstraction. That is, whatever data is pushed in at one end comes
+  out the other and vice versa. For example, all the HTTP request and
+  response messages seen in last lecture and sent and received through
+  sockets on browsers and web servers. This lecture, we will examine
+  the socket interface in more detail. In PA1, you will build a simple
+  client-server application using sockets.
+
+* Any user space process can invoke the socket system call to create a
+  socket. Sockets belong to two families: Unix domain sockets (for
+  process to process communication on the same machine) and Internet
+  sockets (what we will use). Internet sockets are further of three
+  main types: stream socket (uses TCP to send the message given to the
+  socket), datagram socket (uses UDP), and raw socket (sends the given
+  packet as-is without any additional processing).
+
+* Every socket has a socket address: the IP address and a port
+  number. Port number is a 16-bit number used to distinguish sockets
+  on the same machine. Servers open sockets on well known ports, so
+  that clients know how to contact them. For example, web servers
+  listen on port 80, 20/21 for FTP data/control, 22 for SSH, 23
+  Telnet, 25 SMTP (email) etc. Ports 0-1023 are reserved for these
+  well-known services.
+
+* Inside a process / application, open sockets are referenced by a
+  number called the socket descriptor (much like a file
+  descriptor). Whenever you have to refer to a socket to the kernel in
+  a system call, you must quote this number. The socket file
+  descriptor / handle is obtained when any process opens a socket
+  using the "socket" system call.
+
+* After a server creates a socket (byspecifying its type, family etc),
+  it "binds" the socket to a particular well-known IP address and port
+  number.  After server binds to a particular port, it issues the
+  "listen" system call to tell the lower layers to start listening for
+  incoming requests. Whenever an incoming request arrives on the
+  server's socket, it must do an "accept" system call. If the server
+  calls accept, it will block till a request arrives.
+
+* Clients create sockets, but don't pick a port number. Client sockets
+  are assigned a random unused port number that is not reserved by the
+  system. Once a client socket is created, the client "connects" to
+  the server socket by specifying the server IP and port. This
+  connection involves the three-way TCP handshake, and nothing for UDP
+  sockets. 
+
+* When the client connects, the server accepts the connection, a new
+  socket is created at the server for communication with this
+  client. The original listening socket continues to listen for new
+  requests, and the new socket is used to send and receive from a
+  particular client.
+
+* Once the client and server sockets have been connected, both
+  endpoints can read and write from sockets, much like they do from
+  files. For example, you call read(socket number,...) and this call
+  returns when there is some data to be read on the socket. Similarly,
+  the write call writes data into a socket.
+
+* Summary: main system calls: socket (for creation), bind, listen,
+  accept (at server), connect (at client), read, write (at both).
+
+* Note that a lot of these system calls block. That is, when you make
+  the system call, the process regains control and can proceed forward
+  only if a reasonable response is received. For example, accept
+  returns only if a new request arrives. Connect request only after it
+  tries the TCP handshake. Read returns only if data is found or some
+  error occurs. 
+
+* Alternately, you can set socket options to make a socket
+  non-blocking. For example, if you do connect on a non-blocking
+  socket, it returns immediately even when the connection process is
+  in progress. When you do connect after sometime, you will get a
+  success. All system calls on non-blocking sockets return
+  immediately, even when the execution of the system call is in
+  progress.
+
+* How does a server handle multiple clients? Suppose the server has
+  only one process/thread. Initially server blocks on accept. Accept
+  returns with a new client request. Now, when server is handling that
+  client request and waiting for a read on that socket, it cannot
+  accept any other new connections. Similarly, if server is waiting
+  for accept, it cannot read and write from client socket.
+
+* Simple solution for concurrency: whenever a new client request
+  arrives, the server forks a new process. That child process will
+  handle the client for as long as the client is talking to the
+  server. The main server process will continue to listen for new
+  connections. You can do something similar with multiple threads
+  instead of processes (threads are more lightweight, but care must be
+  taken to synchronize them). The popular Apache server works this
+  way.
+
+* Another solution for concurrency: non-blocking sockets. The server
+  periodically maintains a bunch of non-blocking sockets corresponding
+  to different clients (and one main socket for new connections), and
+  periodically "polls" all the sockets for any incoming
+  requests/data. This technique is feasible, but polling is somewhat
+  inefficient.
+
+* A better idea than polling: the select system call. You give the
+  select system call a bunch of sockets, and ask it to monitor
+  them. The system call will return when one or more sockets have data
+  to report. When select completes, we can check which socket(s) had
+  data, and act accordingly (accept the new connection, read data from
+  socket etc.). This is called an "event-driven" architecture.
+
+* Several advanced techniques that perform better than select exist
+  today for what is called Input/Output multiplexing in
+  applications. For example, lookup "epoll" system call.
+
+* In general, designing servers to handle a large number of clients is
+  a challenging problem. I/O multiplexing (avoiding blocking on the
+  socket calls of a single client) is only one part of the
+  puzzle. Typical web servers today do extensive processing on each
+  request, e.g., read/write files or database tables, perform
+  computation etc. For example, consider the web server of a online
+  travel portal. The web server has to receive the user's request,
+  check a backend database for information like ticket availability
+  etc., run some computations for cheapest travel options, and return
+  the response to the user. Each client request involves multiple
+  steps. Therefore, in addition to accept, read on sockets, a client
+  request can block at several places, like disk access or database
+  access. So a good web server needs to be able to multiplex multiple
+  requests in an efficient manner without blocking on any one, and
+  serve as many clients as it can for a given capacity.
+
+* However, no matter how much multiplexing you do, at some point, some
+  system resoruces of the server are bound to run out. That is, after
+  the number of clients exceed a certain capaity, a single server
+  cannot handle the load anymore, because say, the CPU is too busy or
+  disk is the bottleneck or no more free sockets are available. This
+  is called server overload. When the server is overloaded, its
+  performance suffers. Requests fail, response times are high, this is
+  called a "server crash".
+
+* Several techniques exist to scale web servers. The most common idea
+  is to have several "replicas" of the server in a server farm, and
+  have a "load balancer" to distribute load between the replicas. The
+  load balancer can do redirection at the DNS level, at the
+  application layer by looking at HTTP requests (L7 load balancer),
+  based on source or destination IP (L3 load balancer) etc. Load
+  balancers also need to ensure same user goes to same server replica
+  in some cases ("stickiness").
+
+* Content Distribution Network (CDN) - manages several replica servers
+  that hold content. Each user is directed to closest replica. CDNs
+  are third party applications that outsource content distribution
+  from content providers. 
+
+* Further reading:
+
+- "Flash: An Efficient and Portable Web Server", Pai et al.  This
+   paper describes a new architecture for multiplexing requests at a
+   web server. Please skim through the paper to appreciate the problem
+   it is trying to solve. The paper addresses the fact that while the
+   select system call can check for I/O operations on multiple
+   sockets, it cannot check whether multiple disk operations have
+   completed or not. Therefore, even if you use select to not block on
+   socket system calls, you may still end up blocking on disk
+   operations. Therefore, this paper proposes a new architecture for
+   servers that need to access the disk. The Flash web server has one
+   process with a select loop to handle all clients initially. When a
+   client requests disk operations, a separate process is spawned and
+   the client is handed off to that process.
+
+- "Handling Flash Crowds from your Garage", Elson and Howell. This
+  paper describes several techniques you can use to easily build a
+  scalable web server that can handle high volumes of client requests.
